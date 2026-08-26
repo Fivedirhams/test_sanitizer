@@ -1,25 +1,27 @@
 version: '3.8'
 
 services:
-  # Greenmask container that processes dump.sql file
+  # Greenmask container for database sanitization
   greenmask:
     build:
       context: .
       dockerfile: Dockerfile.greenmask
     volumes:
-      - ./dump:/input          # Input dump.sql mounted here
+      - ./dump:/input          # Input dump.sql
       - ./output:/output       # Output sanitized.sql.gz
       - ./transformers:/app/transformers
       - ./prompt_templates:/app/prompt_templates
+      - ./config.yaml:/configs/config.yaml
     environment:
+      # LLM API settings (read by custom transformer)
       - OFOX_API_KEY=${OFOX_API_KEY}
-      - LLM_ENDPOINT=${LLM_ENDPOINT:-https://api.ofox.ai/v1}
       - LLM_MODEL=${LLM_MODEL:-bailian/qwen3.5-flash}
+      - LLM_ENDPOINT=${LLM_ENDPOINT:-https://api.ofox.ai/v1}
       - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-100}
       - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.7}
-    working_dir: /app
+    working_dir: /configs
     command: >
       greenmask sanitise \
-      --source '/input/dump.sql' \
-      --target '/output/sanitized.sql.gz'
-    depends_on: []
+        --source '/input/dump.sql' \
+        --target '/output/sanitized.sql.gz' \
+        --config-file 'config.yaml'

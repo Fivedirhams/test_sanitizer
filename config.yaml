@@ -1,20 +1,28 @@
+# Greenmask configuration for MySQL database sanitization
+# Custom LLM transformer is used for PII data anonymization
+
+# Database source (not used in dump-based workflow, but required by schema)
 database:
   type: mysql
-  # Хост продакшен базы (будет заменён при запуске)
-  host: ${DB_HOST}
+  host: ${DB_HOST:-localhost}
   port: 3306
-  user: ${DB_USER}
-  password: ${DB_PASSWORD}
-  database: ${DB_NAME}
+  user: ${DB_USER:-root}
+  password: ${DB_PASSWORD:-password}
+  database: ${DB_NAME:-test_db}
 
+# Output settings
 output:
   storage: local
-  path: /output/sanitized_dump.sql
+  path: /output/sanitized.sql.gz
   compression: gzip
 
-# Правила трансформации
+# Transformation rules
 transformers:
-  - schema: public
+  # Rules are applied to tables found in the dump
+  # Add your tables and columns here
+  
+  - name: users_transformer
+    schema: public
     table: users
     columns:
       first_name:
@@ -22,14 +30,12 @@ transformers:
         params:
           prompt_template_file: /app/prompt_templates/name.txt
           llm_model: bailian/qwen3.5-flash
-          mapping_path: /output/mapping.json
       
       last_name:
         transformer: custom_llm_masker
         params:
           prompt_template_file: /app/prompt_templates/name.txt
           llm_model: bailian/qwen3.5-flash
-          mapping_path: /output/mapping.json
       
       email:
         transformer: mask_email
@@ -37,21 +43,13 @@ transformers:
           keep_domain: true
           domain_to_use: anonymized.local
       
-      phone_number:
-        transformer: static_replace
-        value: "+7-800-555-35-35"
-      
       birth_date:
         transformer: date_shift
         params:
           shift_days: -7
-      
-      created_at:
-        transformer: timestamp_shift
-        params:
-          shift_days: -7
-
-  - schema: public
+  
+  - name: orders_transformer  
+    schema: public
     table: orders
     columns:
       customer_phone:
@@ -59,25 +57,12 @@ transformers:
         params:
           prompt_template_file: /app/prompt_templates/phone.txt
           llm_model: bailian/qwen3.5-flash
-          mapping_path: /output/mapping.json
       
       shipping_address:
         transformer: static_replace
         value: "141000 г. Мытищи, ул. Заводская д. 1"
 
-  - schema: public
-    table: system_logs
-    columns:
-      user_agent:
-        transformer: static_replace
-        value: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0"
-      
-      ip_address:
-        transformer: ip_anonymize
-        params:
-          method: hash_last_octet
-
-# Сохранение маппинга для обратной совместимости
+# Mapping output (for reverse transformation if needed)
 mapping:
   output_path: /output/mapping.json
   include_original_values: false

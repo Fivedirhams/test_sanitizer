@@ -7,16 +7,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Greenmask via pip
-RUN pip install --no-cache-dir greenmask
+RUN pip install --no-cache-dir greenmask PyYAML requests
 
 # Set working directory
 WORKDIR /app
 
-# Copy custom transformers
-COPY transformers/*.py /app/transformers/
-
-# Expose port if needed (optional)
-EXPOSE 8080
+# Copy custom transformer
+COPY transformers/llm_masker.py /app/transformers/
+COPY prompt_templates/*.txt /app/prompt_templates/
 
 # Default command
 CMD ["bash"]

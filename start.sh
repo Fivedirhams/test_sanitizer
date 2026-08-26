@@ -1,9 +1,10 @@
 #!/bin/bash
-# Быстрый старт: один скрипт - всё работает
+# MySQL Database Sanitizer - Quick Start
+# Один скрипт для запуска санитизации дампа базы данных
 set -e
 
 echo "========================================"
-echo "MySQL Database Sanitizer - Quick Start"
+echo "MySQL Database Sanitizer"
 echo "========================================"
 echo ""
 
@@ -11,29 +12,36 @@ echo ""
 if [ ! -f ./dump.sql ]; then
     echo "⚠️  dump.sql не найден!"
     echo ""
-    echo "Создайте дамп базы данных:"
-    echo "  mysqldump -h HOST -u USER -p DATABASE > dump.sql"
+    echo "Создайте дамп продакшен базы:"
+    echo "  mysqldump -h PRODUCTION_HOST -u PRODUCTION_USER -p > dump.sql"
     echo ""
-    echo "Или переместите существующий дампи в ./dump.sql"
     exit 1
 fi
 
-echo "✅ Dump найден: dump.sql ($(du -h dump.sql | cut -f1))"
+echo "✅ Входные данные: dump.sql ($(du -h dump.sql | cut -f1))"
 
 # Создаём output директорию
 mkdir -p ./output
 
-# Запускаем контейнер
 echo ""
-echo "🚀 Запуск санитизации..."
+echo "🚀 Запуск Greenmask контейнера..."
+echo "   - Читает: ./dump.sql"
+echo "   - Пишет:  ./output/sanitized.sql.gz"
+echo "   - LLM:    bailian/qwen3.5-flash (через Ofox API)"
+echo ""
+
+# Запускаем контейнер
 docker compose run --rm greenmask
 
 echo ""
-echo "✅ Готово!"
+echo "✅ Санитизация завершена!"
 echo ""
 echo "Результат:"
-echo "  📁 ./output/sanitized.sql.gz - заархивированный SQL с анонимизированными данными"
-test -f ./output/mapping.json && echo "  🗺️  ./output/mapping.json - маппинг для обратной совместимости" || echo "  ℹ️  Маппинг не создан (опционально)"
+ls -lh ./output/
+
 echo ""
-echo "Загрузите результат в dev базу:"
-echo "  gunzip -c ./output/sanitized.sql.gz | mysql -h dev-host db_name"
+test -f ./output/mapping.json && echo "ℹ️  Маппинг сохранён: ./output/mapping.json (для обратной совместимости)" || echo "ℹ️  Маппинг не создаётся (опционально)"
+
+echo ""
+echo "Загрузка в dev базу:"
+echo "  gunzip -c ./output/sanitized.sql.gz | mysql -h DEV_HOST db_name"
