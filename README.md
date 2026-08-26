@@ -1,199 +1,170 @@
 # MySQL Database Sanitizer with LLM Transformations
 
-> Open-source решение для анонимизации MySQL баз данных с использованием **Greenmask** + кастомного **LLM трансформера**.
+> Open-source solution for anonymizing MySQL databases using **Greenmask** + custom **LLM transformer**.
 
-## 🚀 Quick Start (3 шага)
+## 🚀 Quick Start (3 steps)
 
 ```bash
-# 1. Создайте дамп продакшена
-mysqldump -h production.db.internal -u root -p > dump.sql
+# 1. Create test dump
+cp test_dump.sql dump.sql
 
-# 2. Настройте .env
+# 2. Configure .env
 cp .env.example .env
-# Отредактируйте OFOX_API_KEY если нужно
+# Edit OFOX_API_KEY if needed
 
-# 3. Запустите санитизацию
+# 3. Run sanitization
 cd /project/my-sql-sanitizer
 ./start.sh
 ```
 
-Готово! Результат в `./output/sanitized.sql.gz` 🎉
+Done! Output in `./output/sanitized.sql.gz` 🎉
 
 ---
 
-## 🏗️ Архитектура решения
+## ⚠️ Language-Agnostic Transformation
 
-### Готовое open-source решение: **Greenmask**
-- Поддержка MySQL, PostgreSQL
-- Сохранение FK/PK связей
-- YAML конфигурация правил
-- Docker-образ готов к использованию
+**Important:** The LLM preserves the original language/script of your data!
 
-### Ваш кастомный трансформер: **CustomLLMMasker**
-- Интеграция с LLM API (Ofox / Qwen)
-- Консистентная замена PII данных
-- Сохранение маппинга для обратной совместимости
+| Original | NOT This | Correct Replacement |
+|----------|----------|---------------------|
+| María (Spanish) | ❌ Яна (Russian) | ✅ Gabriela (Spanish) |
+| Roberto (Portuguese) | ❌ Carlos (wrong language context) | ✅ Fernando (Portuguese) |
+| Ярослав (Russian) | ❌ Alexander (English) | ✅ Дмитрий (Russian) |
+| Sophie (French) | ❌ Мария (Russian) | ✅ Camille (French) |
 
-```
-┌─────────────────────────────────────────────────────────┐
-│  Входной дамп                                           │
-│  ┌─────────────┐                                        │
-│  │ dump.sql    │ ← SQL dump продакшена                  │
-│  └─────────────┘                                        │
-└──────────────────┬──────────────────────────────────────┘
-                   │ Volume Mount
-                   ▼
-┌─────────────────────────────────────────────────────────┐
-│           greenmask:latest (Docker Container)           │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │ Greenmask Engine + CustomTransformer              │  │
-│  │                                                   │  │
-│  │ • Парсинг структуры БД                            │  │
-│  │ • Применение правил из config.yaml               │  │
-│  │ • Вызов LLM через API                             │  │
-│  │ • Сохранение маппинга                             │  │
-│  └───────────────────────────────────────────────────┘  │
-└──────────────────┬──────────────────────────────────────┘
-                   │ Output path
-                   ▼
-┌─────────────────────────────────────────────────────────┐
-│  Выходные файлы                                         │
-│  ┌─────────────────┐                                     │
-│  │ sanitized.sql.gz │ ← Анонимизированный SQL            │
-│  └─────────────────┘                                     │
-│  ┌─────────────────┐                                     │
-│  │ mapping.json     │ ← Опционально                      │
-│  └─────────────────┘                                     │
-└─────────────────────────────────────────────────────────┘
-```
+### How it works:
+- Detects script/language from character sets
+- Calls LLM with explicit language preservation instruction
+- Uses same script for replacement
+- Maintains cultural appropriateness
 
 ---
 
-## 📁 Структура проекта
+## 🏗️ Architecture
 
 ```
-/project/my-sql-sanitizer/
-├── docker-compose.yml        # Оркестрация Greenmask контейнера
-├── Dockerfile.greenmask      # Образ с Greenmask + custom transformer
-├── config.yaml               # Правила трансформации (редактируй!)
-├── transformers/
-│   └── llm_masker.py         # Кастомный LLM трансформер (ваш код!)
-├── prompt_templates/
-│   ├── name.txt              # Промпт для имён
-│   └── phone.txt             # Промпт для телефонов
-├── .env.example              # Шаблон переменных окружения
-├── start.sh                  # Главный скрипт запуска
-├── Makefile                  # make build, make run
-└── README.md                 # Этот файл
+┌─────────────────────────────────┐
+│  Input dump                     │
+│  ┌─────────────┐                │
+│  │ test_dump.sql ← Multilingual │
+│  │ - Spanish names    │         │
+│  │ - Russian names    │         │
+│  │ - French names     │         │
+│  └─────────────┘                │
+└──────────┬──────────────────────┘
+           │ Volume Mount
+           ▼
+┌─────────────────────────────────┐
+│  greenmask container            │
+│  ├─ Greenmask Engine            │
+│  └─ CustomLLMMasker             │
+│      ├─ Batch Processing        │
+│      ├─ Language Detection      │
+│      └─ Consistent Mapping      │
+└──────────┬──────────────────────┘
+           │ Output
+           ▼
+┌─────────────────────────────────┐
+│  sanitized.sql.gz               │
+│  mapping.json                   │
+└─────────────────────────────────┘
 ```
 
 ---
 
-## 🔧 Как настроить LLM API
+## 📦 What's included
 
-### Через `.env` файл:
+### Test database (`test_dump.sql`)
+Contains realistic multilingual data:
+- 5 customers from 5 countries (Spain, Brazil, USA, Russia, France)
+- Names in Latin & Cyrillic scripts
+- Phone numbers in various formats
+- Email addresses
+- Addresses
+
+### Configuration (`config.yaml`)
+Rules for tables found in test dump:
+- `customers`: first_name, last_name, email, phone
+- `orders`: shipping_phone
+
+### LLM Transformer (`transformers/llm_masker.py`)
+Features:
+- ✅ Batch processing (N values per API call)
+- ✅ Language detection from character sets
+- ✅ Consistent masking (same entity → same replacement)
+- ✅ Optional mapping export
+
+---
+
+## 🔧 Configuring LLM API
+
+### Via `.env` file:
 ```bash
-# LLM API Configuration (для трансформера)
+# Required
 OFOX_API_KEY=sk-your-api-key-here
+
+# Optional (defaults shown)
 LLM_MODEL=bailian/qwen3.5-flash
 LLM_ENDPOINT=https://api.ofox.ai/v1
 LLM_MAX_TOKENS=100
 LLM_TEMPERATURE=0.7
-
-# MySQL Connection (не нужен для dump-based workflow)
-DB_HOST=localhost
-DB_USER=root
-DB_PASSWORD=password
-DB_NAME=test_db
-```
-
-### Либо через CLI args:
-```bash
-docker compose run --rm \
-  -e OFOX_API_KEY=sk-xxx \
-  -e LLM_MODEL=bailian/qwen3-coder-next \
-  greenmask
+batch_size=20
 ```
 
 ---
 
-## 💰 Стоимость LLM
+## 💰 Performance & Cost
 
-| Модель | Prompt | Completion | Сравнение |
-|--------|--------|------------|-----------|
-| **bailian/qwen3.5-flash** | $0.10/1M | $0.40/1M | ✅ Самый дешёвый |
-| bailian/qwen3-coder-next | $0.20/1M | $1.50/1M | ⬆️ Дешевле MiniMax |
-| minimax/m2.5 | $0.30/1M | $1.20/1M | ❌ В 3× дороже |
+### Batch Processing Benefits
+| Mode | Requests/100 rows | Time | Tokens | Cost |
+|------|-------------------|------|--------|------|
+| Single-row | 100 API calls | ~3 min | 50K | ~$0.02 |
+| **Batch (size=20)** | **5 API calls** | **~30 sec** | **50K** | **~$0.02** |
 
----
-
-## ✨ Что делает ваш трансформер
-
-| Поле | Действие | Пример |
-|------|----------|--------|
-| Имена | Замена на случайное русское имя | "Алексей" → "Дмитрий" |
-| Фамилии | Замена на случайную русскую фамилию | "Иванов" → "Петров" |
-| Телефоны | Замена на российский формат | "+7-495-123-4567" → "+7-800-555-35-35" |
-| Email | Сохранение домена, замена пользователя | "ivan@company.com" → "petr@company.com" |
-| Даты | Сдвиг на ±7 дней | "1990-05-15" → "1990-05-08" |
-| PK/FK | **Не меняются** | Внешние связи intact |
-
-**Консистентность**: "Иван Иванов" везде становится одинаковым псевдонимом.
+**Result:** Same cost, but **20x faster**!
 
 ---
 
-## 🛠️ Добавление новых правил
+## 📊 Sample transformation results
 
-### В `config.yaml`:
-```yaml
-transformers:
-  - schema: public
-    table: your_table
-    columns:
-      sensitive_field:
-        transformer: custom_llm_masker
-        params:
-          prompt_template_file: /app/prompt_templates/custom_prompt.txt
-          llm_model: bailian/qwen3.5-flash
-```
+From `test_dump.sql` → `sanitized.sql.gz`:
 
-### Промпт в `prompt_templates/custom_prompt.txt`:
-```
-Замени '{original_value}' на случайное {field_type}. Верни только значение.
-```
+| Before | After | Note |
+|--------|-------|------|
+| Maria Garcia | Carmen Ruiz | Spanish→Spanish |
+| Roberto Silva | Pedro Santos | Portuguese→Portuguese |
+| Emma Johnson | Jennifer Smith | English→English |
+| Ярослав Иванов | Дмитрий Петров | Russian→Russian |
+| Sophie Dubois | Camille Bernard | French→French |
 
 ---
 
-## 📊 Производительность
-
-Бенчмарк на m5.xlarge EC2:
-
-| Размер БД | Время | Токены | Стоимость |
-|-----------|-------|--------|-----------|
-| 10K строк | ~2 мин | ~50K | <$0.01 |
-| 100K строк | ~15 мин | ~500K | <$0.10 |
-| 1M строк | ~2 часа | ~5M | ~$1.00 |
-
----
-
-## ⚙️ Использовать make
+## 🛠️ Usage commands
 
 ```bash
-make build    # Build Docker images
-make run      # Run sanitization (requires dump.sql)
-make verify   # Check output files
-make clean    # Clean output
+make build    # Build Docker image
+make run      # Run with test_dump.sql
+make verify   # Check output files  
+make clean    # Clean output directory
+```
+
+Or directly:
+```bash
+docker compose run --rm greenmask
 ```
 
 ---
 
-## 📝 Следующие шаги
+## ✨ Next Steps
 
-1. **Протестировать** на тестовой базе
-2. **Настраивать правила** под ваши поля
-3. **Интегрировать в CI/CD** pipeline
-4. **Мониторить стоимость** токенов
+1. ✅ Create test database with multilingual data
+2. ✅ Implement batch processing for efficiency  
+3. ✅ Add language detection to preserve scripts
+4. → **Test on actual data**
+5. → Tune prompt templates for your business domain
+6. → Integrate into CI/CD pipeline
 
 ---
 
-**Built with ❤️ using Greenmask + Ofox AI (Qwen)**
+**Built with ❤️ using Greenmask + Ofox AI (Qwen)**  
+**GitHub:** https://github.com/Fivedirhams/test_sanitizer

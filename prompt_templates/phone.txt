@@ -1,2 +1,3 @@
-Замени российский телефон '{original_value}' на другой случайный номер российского формата (+7-XXX-XXX-XX-XX).
-Верни только номер без пояснений.
+Replace '{original_value}' with a realistic PHONE NUMBER in the same country format.
+Return ONLY the new number (no explanations).
+Examples: Spain→+34-XXX, Brazil→+55-XX-XXXXX, USA→+1-XXX, Russia→+7-XXX.

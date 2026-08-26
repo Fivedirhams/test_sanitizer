@@ -1,7 +1,7 @@
 # Greenmask configuration for MySQL database sanitization
 # Custom LLM transformer is used for PII data anonymization
+# ⚠️  LANGUAGE-AGNOSTIC: LLM will preserve original script/encoding (no María → Ярослав!)
 
-# Database source (not used in dump-based workflow, but required by schema)
 database:
   type: mysql
   host: ${DB_HOST:-localhost}
@@ -10,7 +10,6 @@ database:
   password: ${DB_PASSWORD:-password}
   database: ${DB_NAME:-test_db}
 
-# Output settings
 output:
   storage: local
   path: /output/sanitized.sql.gz
@@ -18,12 +17,11 @@ output:
 
 # Transformation rules
 transformers:
-  # Rules are applied to tables found in the dump
-  # Add your tables and columns here
   
-  - name: users_transformer
-    schema: public
-    table: users
+  # CUSTOMERS TABLE - sensitive PII fields
+  - name: customers_transformer
+    schema: test_db
+    table: customers
     columns:
       first_name:
         transformer: custom_llm_masker
@@ -40,27 +38,26 @@ transformers:
       email:
         transformer: mask_email
         params:
-          keep_domain: true
-          domain_to_use: anonymized.local
+          keep_domain: false
+          new_prefix: anon
+          new_domain: example.com
       
-      birth_date:
-        transformer: date_shift
+      phone:
+        transformer: mask_phone
         params:
-          shift_days: -7
+          country_code: "+1"
+          format: international
   
-  - name: orders_transformer  
-    schema: public
+  # ORDERS TABLE
+  - name: orders_transformer
+    schema: test_db
     table: orders
     columns:
-      customer_phone:
-        transformer: custom_llm_masker
+      shipping_phone:
+        transformer: mask_phone
         params:
-          prompt_template_file: /app/prompt_templates/phone.txt
-          llm_model: bailian/qwen3.5-flash
-      
-      shipping_address:
-        transformer: static_replace
-        value: "141000 г. Мытищи, ул. Заводская д. 1"
+          country_code: "+1"
+          format: international
 
 # Mapping output (for reverse transformation if needed)
 mapping:
