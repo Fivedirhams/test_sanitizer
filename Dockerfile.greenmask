@@ -1,0 +1,22 @@
+FROM python:3.11-slim
+
+# Install MySQL client for mysqldump operations
+RUN apt-get update && apt-get install -y \
+    mysql-client \
+    gzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Greenmask via pip
+RUN pip install --no-cache-dir greenmask
+
+# Set working directory
+WORKDIR /app
+
+# Copy custom transformers
+COPY transformers/*.py /app/transformers/
+
+# Expose port if needed (optional)
+EXPOSE 8080
+
+# Default command
+CMD ["bash"]

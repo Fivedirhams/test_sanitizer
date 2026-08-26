@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  # Сервис Greenmask для санитизации дампа
+  greenmask:
+    build:
+      context: .
+      dockerfile: Dockerfile.greenmask
+    volumes:
+      - ./dump:/input
+      - ./output:/output
+      - ./transformers:/app/transformers
+      - ./config:/configs
+    environment:
+      - OFOX_API_KEY=${OFOX_API_KEY}
+    working_dir: /configs
+    command: ["sanitise", "-f", "config.yaml"]

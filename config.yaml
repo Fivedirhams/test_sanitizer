@@ -1,0 +1,80 @@
+database:
+  type: mysql
+  # Хост продакшен базы (будет заменён при запуске)
+  host: ${DB_HOST}
+  port: 3306
+  user: ${DB_USER}
+  password: ${DB_PASSWORD}
+  database: ${DB_NAME}
+
+output:
+  storage: local
+  path: /output/sanitized_dump.sql
+  compression: gzip
+
+# Правила трансформации
+transformers:
+  - schema: public
+    table: users
+    columns:
+      first_name:
+        transformer: custom_llm_masker
+        params:
+          prompt_template_file: ./prompt_templates/name.txt
+          llm_model: bailian/qwen3.5-flash
+      
+      last_name:
+        transformer: custom_llm_masker
+        params:
+          prompt_template_file: ./prompt_templates/name.txt
+          llm_model: bailian/qwen3.5-flash
+      
+      email:
+        transformer: mask_email
+        params:
+          keep_domain: true
+          domain_to_use: anonymized.local
+      
+      phone_number:
+        transformer: static_replace
+        value: "+7-800-555-35-35"
+      
+      birth_date:
+        transformer: date_shift
+        params:
+          shift_days: -7
+      
+      created_at:
+        transformer: timestamp_shift
+        params:
+          shift_days: -7
+
+  - schema: public
+    table: orders
+    columns:
+      customer_phone:
+        transformer: custom_llm_masker
+        params:
+          prompt_template_file: ./prompt_templates/phone.txt
+          llm_model: bailian/qwen3.5-flash
+      
+      shipping_address:
+        transformer: static_replace
+        value: "141000 г. Мытищи, ул. Заводская д. 1"
+
+  - schema: public
+    table: system_logs
+    columns:
+      user_agent:
+        transformer: static_replace
+        value: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0"
+      
+      ip_address:
+        transformer: ip_anonymize
+        params:
+          method: hash_last_octet
+
+# Сохранение маппинга для обратной совместимости
+mapping:
+  output_path: /output/mapping.json
+  include_original_values: false
