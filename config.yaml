@@ -1,11 +1,11 @@
 # Greenmask configuration for MySQL database sanitization
 # 
-# 🎯 Best Practice: NEVER change Primary Keys!
-# They are referenced by Foreign Keys across tables. Changing them would
-# break referential integrity unless you apply CONSISTENT remapping.
-#
-# ✅ RECOMMENDED: Skip all ID columns entirely (keep original values)
-# This automatically preserves FK relationships without extra work!
+# ✅ REALISTIC ANONYMIZATION MODE ONLY (no obfuscation)
+# All transformations generate real-looking data while preserving:
+# - Language/script consistency (Spanish → Spanish, not Russian!)
+# - Structural consistency (same area code, similar email format)
+# - Entity consistency (same value = same replacement everywhere)
+# - Foreign key integrity (all *_id columns preserved automatically)
 
 database:
   type: mysql
@@ -21,32 +21,25 @@ output:
   compression: gzip
 
 # =============================================================================
-# PRIMARY KEY PRESERVATION STRATEGY
+# PRIMARY KEY PRESERVATION
 # =============================================================================
-# All *_id columns will be SKIPPED (not transformed).
-# This ensures Foreign Key relationships remain intact across all tables.
-#
-# Table structure example:
-#   customers.customer_id (PK) → NOT transformed → stays 1, 2, 3...
-#   orders.customer_id (FK)    → references customers → same value 1, 2, 3...
-#
-# RESULT: Referential integrity preserved automatically! ✅
+# ALL *_id columns are automatically skipped to preserve FK relationships
+# This is CRITICAL for maintaining referential integrity!
 
 transformers:
   
   # =============================================================================
-  # CUSTOMERS TABLE - Primary entity with PII fields
+  # CUSTOMERS TABLE - PII fields with REALISTIC anonymization
   # =============================================================================
   - name: customers_transformer
     schema: test_db
     table: customers
     
-    # Primary Key - KEEP AS IS (preserve FK references from orders/system_logs)
     skip_columns:
-      - customer_id       # ← IMPORTANT! Never change this
-    
+      - customer_id       # ← IMPORTANT! NEVER change PKs
+      
     columns:
-      # --- Names (LLM-based, language-aware replacement) ---
+      # Names → LLM-based language-aware replacement
       first_name:
         transformer: custom_llm_masker
         params:
@@ -59,26 +52,21 @@ transformers:
           prompt_template_file: /app/prompt_templates/name.txt
           llm_model: bailian/qwen3.5-flash
       
-      # --- Contact Information (Greenmask built-in transformers) ---
+      # Email → Realistic generator (NOT anon@example.com!)
       email:
-        transformer: mask_email
+        transformer: custom_email_generator
         params:
-          keep_domain: false       # Don't preserve company domain
-          new_prefix: anon         # maria.garcia → anon@example.com
-          new_domain: example.com
+          preserve_domain: false
+          # Creates: maria.garcia@gmail.com → pedro.silva@gmail.com
       
       phone:
-        transformer: mask_phone
+        transformer: custom_phone_generator
         params:
-          country_code: "+1"       # Default format
-          format: international     # +1-XXX-XXX-XXXX
-    
-    # --- Date Fields (shift but maintain relative ordering) ---
-    filters:
-      birth_date:
-        transformer: date_shift
-        params:
-          shift_days: -7           # Preserve age distribution pattern
+          # Preserves country/area code: +7-495-123-4567 → +7-495-987-6543
+        
+      # Address → Street changes but city/country preserved
+      address:
+        transformer: city_preserving_address_masker
   
   # =============================================================================
   # ORDERS TABLE - References customers via FK
@@ -87,69 +75,43 @@ transformers:
     schema: test_db
     table: orders
     
-    # Foreign Key customer_id -> references customers.customer_id (PK preserved above!)
-    # Since customer_id in orders is FK pointing to unchanged primary key,
-    # we DON'T need to transform it either - it remains consistent!
     skip_columns:
-      - order_id              # PK of orders
-      - customer_id           # FK to customers - AUTO-PRESERVED ✅
+      - order_id              # PK
+      - customer_id           # FK → AUTO-PRESERVED ✅
     
     columns:
-      # Shipping Address - Use static placeholder (consistent across all records)
       shipping_address:
-        transformer: static_replace
-        value: "456 Oak Avenue, Chicago, IL 60601, USA"
-        
-        # Alternative (if you want variety per record):
-        # transformer: city_preserving_address_masker
-        # params:
-        #   prompt_template_file: /app/prompt_templates/address.txt
-        #   llm_model: bailian/qwen3.5-flash
+        transformer: city_preserving_address_masker
       
-      # Phone number
       shipping_phone:
-        transformer: mask_phone
-        params:
-          country_code: "+1"
-          format: international
+        transformer: custom_phone_generator
       
-      # Status - randomize for realism
       status:
         transformer: random_select
         params:
           options: ["completed", "pending", "shipped", "cancelled"]
-          
-        # Alternative: LLM-based with context
-        # transformer: custom_llm_masker
-        # params:
-        #   prompt_template_file: /app/prompt_templates/order_status.txt
-        #   llm_model: bailian/qwen3.5-flash
   
   # =============================================================================
-  # SYSTEM LOGS TABLE - Technical identifiers & events
+  # SYSTEM LOGS TABLE - Technical data & events
   # =============================================================================
   - name: system_logs_transformer
     schema: test_db
     table: system_logs
     
-    # Primary keys - never transform
     skip_columns:
       - log_id                # PK
-      - user_id               # FK to customers.user_id - PRESERVED ✅
+      - user_id               # FK → AUTO-PRESERVED ✅
     
     columns:
-      # IP Address - Built-in anonymizer preserves subnet structure
       ip_address:
         transformer: ip_anonymize
         params:
-          method: hash_last_octet   # 192.168.1.100 → 192.168.1.XXX
+          method: hash_last_octet
       
-      # User Agent - Replace with generic string
       user_agent:
         transformer: static_replace
-        value: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0"
+        value: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0"
     
-    # Timestamps - shift to preserve chronological order but lose real time
     timestamp_filters:
       timestamp:
         transformer: timestamp_shift
@@ -157,15 +119,8 @@ transformers:
           shift_days: -7
 
 # =============================================================================
-# MAPPING CONFIGURATION (Optional)
+# MAPPING OUTPUT (optional)
 # =============================================================================
-# Do you want to save transformation mappings?
-# - include_original_values: false (RECOMMENDED) - only stores NEW values
-# - include_original_values: true (NOT recommended) - stores both old AND new
-#
-# WARNING: Even mapping.json itself is sensitive data containing all PII
-# transformations! Delete it after testing if not needed.
-
 mapping:
   output_path: /output/mapping.json
   include_original_values: false
