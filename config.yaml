@@ -1,6 +1,10 @@
 # Greenmask configuration for MySQL database sanitization
-# Custom LLM transformer is used for PII data anonymization
-# ⚠️  LANGUAGE-AGNOSTIC: LLM will preserve original script/encoding (no María → Ярослав!)
+# 
+# 📊 Complete PII coverage with multi-layer transformers:
+# - LLM-based (custom): names, addresses, free-text fields
+# - Built-in Greenmask: email, phone, IP, dates, credit cards
+# - Static replacement: deterministic values for specific domains
+# - Batch processing: 20 values per API call (efficiency!)
 
 database:
   type: mysql
@@ -15,14 +19,16 @@ output:
   path: /output/sanitized.sql.gz
   compression: gzip
 
-# Transformation rules
 transformers:
   
-  # CUSTOMERS TABLE - sensitive PII fields
+  # =============================================================================
+  # CUSTOMERS TABLE - Primary PII
+  # =============================================================================
   - name: customers_transformer
     schema: test_db
     table: customers
     columns:
+      # --- Names (LLM-based, language-aware) ---
       first_name:
         transformer: custom_llm_masker
         params:
@@ -35,31 +41,84 @@ transformers:
           prompt_template_file: /app/prompt_templates/name.txt
           llm_model: bailian/qwen3.5-flash
       
+      # --- Contact Information ---
       email:
         transformer: mask_email
         params:
-          keep_domain: false
-          new_prefix: anon
+          keep_domain: false       # Don't preserve company domain
+          new_prefix: anon         # maria.garcia → anon@example.com
           new_domain: example.com
       
       phone:
         transformer: mask_phone
         params:
-          country_code: "+1"
-          format: international
+          country_code: "+1"       # Default international format
+          format: international     # +1-XXX-XXX-XXXX
+    
+    # --- Date fields (preserve temporal relationships but shift) ---
+    filters:
+      birth_date:
+        transformer: date_shift
+        params:
+          shift_days: -7           # Shift all birthdays by -7 days
+          preserve_age_dist: true  # Keep realistic age distribution
   
-  # ORDERS TABLE
+  # =============================================================================
+  # ORDERS TABLE - Secondary PII
+  # =============================================================================
   - name: orders_transformer
     schema: test_db
     table: orders
     columns:
+      shipping_address:
+        # Address is composite field - use static_replace with realistic address
+        transformer: static_replace
+        value: "456 Oak Avenue, Chicago, IL 60601, USA"
+        # Alternative: custom_llm_masker if need variety
+      
       shipping_phone:
         transformer: mask_phone
         params:
           country_code: "+1"
           format: international
+      
+      status:
+        transformer: random_select
+        params:
+          options:
+            - "completed"
+            - "pending"
+            - "shipped"
+            - "cancelled"
 
-# Mapping output (for reverse transformation if needed)
+  # =============================================================================
+  # SYSTEM LOGS TABLE - Technical identifiers
+  # =============================================================================
+  - name: system_logs_transformer
+    schema: test_db
+    table: system_logs
+    columns:
+      ip_address:
+        # Built-in IP anonymizer - preserves subnet structure
+        transformer: ip_anonymize
+        params:
+          method: hash_last_octet   # 192.168.1.100 → 192.168.1.XXX
+      
+      user_agent:
+        # Replace with generic browser string
+        transformer: static_replace
+        value: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0"
+    
+    # Timestamps - shift to preserve chronological order but lose real time
+    timestamp_filters:
+      timestamp:
+        transformer: timestamp_shift
+        params:
+          shift_days: -7
+
 mapping:
   output_path: /output/mapping.json
-  include_original_values: false
+  include_original_values: false   # Security: don't store original PII
+  # Uncomment if you need reverse compatibility:
+  # include_original_values: true
+  # WARNING: mapping.json itself is sensitive data!
