@@ -1,10 +1,11 @@
 # Greenmask configuration for MySQL database sanitization
 # 
-# 📊 Complete PII coverage with multi-layer transformers:
-# - LLM-based (custom): names, addresses, free-text fields
-# - Built-in Greenmask: email, phone, IP, dates, credit cards
-# - Static replacement: deterministic values for specific domains
-# - Batch processing: 20 values per API call (efficiency!)
+# 🎯 Best Practice: NEVER change Primary Keys!
+# They are referenced by Foreign Keys across tables. Changing them would
+# break referential integrity unless you apply CONSISTENT remapping.
+#
+# ✅ RECOMMENDED: Skip all ID columns entirely (keep original values)
+# This automatically preserves FK relationships without extra work!
 
 database:
   type: mysql
@@ -19,16 +20,33 @@ output:
   path: /output/sanitized.sql.gz
   compression: gzip
 
+# =============================================================================
+# PRIMARY KEY PRESERVATION STRATEGY
+# =============================================================================
+# All *_id columns will be SKIPPED (not transformed).
+# This ensures Foreign Key relationships remain intact across all tables.
+#
+# Table structure example:
+#   customers.customer_id (PK) → NOT transformed → stays 1, 2, 3...
+#   orders.customer_id (FK)    → references customers → same value 1, 2, 3...
+#
+# RESULT: Referential integrity preserved automatically! ✅
+
 transformers:
   
   # =============================================================================
-  # CUSTOMERS TABLE - Primary PII
+  # CUSTOMERS TABLE - Primary entity with PII fields
   # =============================================================================
   - name: customers_transformer
     schema: test_db
     table: customers
+    
+    # Primary Key - KEEP AS IS (preserve FK references from orders/system_logs)
+    skip_columns:
+      - customer_id       # ← IMPORTANT! Never change this
+    
     columns:
-      # --- Names (LLM-based, language-aware) ---
+      # --- Names (LLM-based, language-aware replacement) ---
       first_name:
         transformer: custom_llm_masker
         params:
@@ -41,7 +59,7 @@ transformers:
           prompt_template_file: /app/prompt_templates/name.txt
           llm_model: bailian/qwen3.5-flash
       
-      # --- Contact Information ---
+      # --- Contact Information (Greenmask built-in transformers) ---
       email:
         transformer: mask_email
         params:
@@ -52,60 +70,82 @@ transformers:
       phone:
         transformer: mask_phone
         params:
-          country_code: "+1"       # Default international format
+          country_code: "+1"       # Default format
           format: international     # +1-XXX-XXX-XXXX
     
-    # --- Date fields (preserve temporal relationships but shift) ---
+    # --- Date Fields (shift but maintain relative ordering) ---
     filters:
       birth_date:
         transformer: date_shift
         params:
-          shift_days: -7           # Shift all birthdays by -7 days
-          preserve_age_dist: true  # Keep realistic age distribution
+          shift_days: -7           # Preserve age distribution pattern
   
   # =============================================================================
-  # ORDERS TABLE - Secondary PII
+  # ORDERS TABLE - References customers via FK
   # =============================================================================
   - name: orders_transformer
     schema: test_db
     table: orders
+    
+    # Foreign Key customer_id -> references customers.customer_id (PK preserved above!)
+    # Since customer_id in orders is FK pointing to unchanged primary key,
+    # we DON'T need to transform it either - it remains consistent!
+    skip_columns:
+      - order_id              # PK of orders
+      - customer_id           # FK to customers - AUTO-PRESERVED ✅
+    
     columns:
+      # Shipping Address - Use static placeholder (consistent across all records)
       shipping_address:
-        # Address is composite field - use static_replace with realistic address
         transformer: static_replace
         value: "456 Oak Avenue, Chicago, IL 60601, USA"
-        # Alternative: custom_llm_masker if need variety
+        
+        # Alternative (if you want variety per record):
+        # transformer: city_preserving_address_masker
+        # params:
+        #   prompt_template_file: /app/prompt_templates/address.txt
+        #   llm_model: bailian/qwen3.5-flash
       
+      # Phone number
       shipping_phone:
         transformer: mask_phone
         params:
           country_code: "+1"
           format: international
       
+      # Status - randomize for realism
       status:
         transformer: random_select
         params:
-          options:
-            - "completed"
-            - "pending"
-            - "shipped"
-            - "cancelled"
-
+          options: ["completed", "pending", "shipped", "cancelled"]
+          
+        # Alternative: LLM-based with context
+        # transformer: custom_llm_masker
+        # params:
+        #   prompt_template_file: /app/prompt_templates/order_status.txt
+        #   llm_model: bailian/qwen3.5-flash
+  
   # =============================================================================
-  # SYSTEM LOGS TABLE - Technical identifiers
+  # SYSTEM LOGS TABLE - Technical identifiers & events
   # =============================================================================
   - name: system_logs_transformer
     schema: test_db
     table: system_logs
+    
+    # Primary keys - never transform
+    skip_columns:
+      - log_id                # PK
+      - user_id               # FK to customers.user_id - PRESERVED ✅
+    
     columns:
+      # IP Address - Built-in anonymizer preserves subnet structure
       ip_address:
-        # Built-in IP anonymizer - preserves subnet structure
         transformer: ip_anonymize
         params:
           method: hash_last_octet   # 192.168.1.100 → 192.168.1.XXX
       
+      # User Agent - Replace with generic string
       user_agent:
-        # Replace with generic browser string
         transformer: static_replace
         value: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0"
     
@@ -116,9 +156,16 @@ transformers:
         params:
           shift_days: -7
 
+# =============================================================================
+# MAPPING CONFIGURATION (Optional)
+# =============================================================================
+# Do you want to save transformation mappings?
+# - include_original_values: false (RECOMMENDED) - only stores NEW values
+# - include_original_values: true (NOT recommended) - stores both old AND new
+#
+# WARNING: Even mapping.json itself is sensitive data containing all PII
+# transformations! Delete it after testing if not needed.
+
 mapping:
   output_path: /output/mapping.json
-  include_original_values: false   # Security: don't store original PII
-  # Uncomment if you need reverse compatibility:
-  # include_original_values: true
-  # WARNING: mapping.json itself is sensitive data!
+  include_original_values: false

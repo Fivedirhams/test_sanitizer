@@ -21,6 +21,49 @@ Done! Output in `./output/sanitized.sql.gz` 🎉
 
 ---
 
+## 🔐 Primary Key Preservation Strategy ⭐ IMPORTANT!
+
+### How we maintain referential integrity:
+
+**Key principle: NEVER change Primary Keys!**
+
+```sql
+-- BEFORE
+CREATE TABLE customers (customer_id INT PRIMARY KEY, first_name VARCHAR(50));
+CREATE TABLE orders (order_id INT PRIMARY KEY, customer_id INT, ...);
+
+-- Orders.customer_id = FOREIGN KEY → references customers.customer_id
+INSERT INTO customers VALUES (1, 'Maria');
+INSERT INTO orders VALUES (1, 1, 'Laptop');  -- customer_id=1 links to customers.customer_id=1 ✅
+
+-- AFTER SANITIZATION (without changing IDs):
+DELETE FROM customers; CREATE TABLE customers (customer_id INT PRIMARY KEY, ...);
+INSERT INTO customers VALUES (1, 'Carmen');  -- customer_id still 1! ✅
+
+DELETE FROM orders; CREATE TABLE orders (order_id INT PRIMARY KEY, ...);
+INSERT INTO orders VALUES (1, 1, 'Laptop');  -- customer_id=1 still links! ✅
+```
+
+### Why NOT to change Primary Keys:
+
+| If you CHANGE PK | Result |
+|------------------|--------|
+| customers.customer_id: 1 → 999 | Breaks FK in orders table! ❌ |
+| orders.customer_id FK: stays 1 | Now points to NON-EXISTENT customer ❌ |
+
+| If you KEEP PK | Result |
+|----------------|--------|
+| customers.customer_id: stays 1 | FK integrity maintained ✅ |
+| orders.customer_id FK: stays 1 | Correctly points to customer ✅ |
+
+### Our solution:
+✅ **All `_id` columns are SKIPPED** by Greenmask
+✅ Foreign Key relationships preserved AUTOMATICALLY
+✅ No complex remapping logic needed
+✅ Fast, safe, reliable!
+
+---
+
 ## ⚠️ Language-Agnostic Transformation
 
 **Important:** The LLM preserves the original language/script of your data!
