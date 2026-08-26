@@ -1,213 +1,75 @@
-# MySQL Database Sanitizer with LLM Transformations
+# MySQL Database Sanitizer with LLM-based Masking
 
-> Open-source solution for anonymizing MySQL databases using **Greenmask** + custom **LLM transformer**.
+Production-ready tool for creating sanitized test databases from MySQL dumps using custom AI transformers.
 
-## 🚀 Quick Start (3 steps)
+## Features
+
+- ✅ **Language-aware masking** - names stay in original language (María → Carmen, not Яна)
+- ✅ **FK integrity preserved** - Primary Keys never transformed, foreign keys always valid
+- ✅ **Entity consistency** - same customer name = same replacement across all tables
+- ✅ **City-preserving addresses** - streets changed but cities/countries remain consistent
+- ✅ **Batch processing ready** - supports column-level batching for large datasets
+- ✅ **Docker-native** - single container orchestration with Greenmask engine
+
+## Quick Start
 
 ```bash
-# 1. Create test dump
-cp test_dump.sql dump.sql
-
-# 2. Configure .env
+# 1. Configure API key
 cp .env.example .env
-# Edit OFOX_API_KEY if needed
+echo 'OFOX_API_KEY=sk-your-key-here' >> .env
 
-# 3. Run sanitization
-cd /project/my-sql-sanitizer
+# 2. Run on sample data
+cp examples/chinook_test.sql dump.sql
 ./start.sh
+
+# 3. Check result
+gunzip -c output/sanitized.sql.gz | head -50
 ```
 
-Done! Output in `./output/sanitized.sql.gz` 🎉
-
----
-
-## 🔐 Primary Key Preservation Strategy ⭐ IMPORTANT!
-
-### How we maintain referential integrity:
-
-**Key principle: NEVER change Primary Keys!**
-
-```sql
--- BEFORE
-CREATE TABLE customers (customer_id INT PRIMARY KEY, first_name VARCHAR(50));
-CREATE TABLE orders (order_id INT PRIMARY KEY, customer_id INT, ...);
-
--- Orders.customer_id = FOREIGN KEY → references customers.customer_id
-INSERT INTO customers VALUES (1, 'Maria');
-INSERT INTO orders VALUES (1, 1, 'Laptop');  -- customer_id=1 links to customers.customer_id=1 ✅
-
--- AFTER SANITIZATION (without changing IDs):
-DELETE FROM customers; CREATE TABLE customers (customer_id INT PRIMARY KEY, ...);
-INSERT INTO customers VALUES (1, 'Carmen');  -- customer_id still 1! ✅
-
-DELETE FROM orders; CREATE TABLE orders (order_id INT PRIMARY KEY, ...);
-INSERT INTO orders VALUES (1, 1, 'Laptop');  -- customer_id=1 still links! ✅
-```
-
-### Why NOT to change Primary Keys:
-
-| If you CHANGE PK | Result |
-|------------------|--------|
-| customers.customer_id: 1 → 999 | Breaks FK in orders table! ❌ |
-| orders.customer_id FK: stays 1 | Now points to NON-EXISTENT customer ❌ |
-
-| If you KEEP PK | Result |
-|----------------|--------|
-| customers.customer_id: stays 1 | FK integrity maintained ✅ |
-| orders.customer_id FK: stays 1 | Correctly points to customer ✅ |
-
-### Our solution:
-✅ **All `_id` columns are SKIPPED** by Greenmask
-✅ Foreign Key relationships preserved AUTOMATICALLY
-✅ No complex remapping logic needed
-✅ Fast, safe, reliable!
-
----
-
-## ⚠️ Language-Agnostic Transformation
-
-**Important:** The LLM preserves the original language/script of your data!
-
-| Original | NOT This | Correct Replacement |
-|----------|----------|---------------------|
-| María (Spanish) | ❌ Яна (Russian) | ✅ Gabriela (Spanish) |
-| Roberto (Portuguese) | ❌ Carlos (wrong language context) | ✅ Fernando (Portuguese) |
-| Ярослав (Russian) | ❌ Alexander (English) | ✅ Дмитрий (Russian) |
-| Sophie (French) | ❌ Мария (Russian) | ✅ Camille (French) |
-
-### How it works:
-- Detects script/language from character sets
-- Calls LLM with explicit language preservation instruction
-- Uses same script for replacement
-- Maintains cultural appropriateness
-
----
-
-## 🏗️ Architecture
+## Files
 
 ```
-┌─────────────────────────────────┐
-│  Input dump                     │
-│  ┌─────────────┐                │
-│  │ test_dump.sql ← Multilingual │
-│  │ - Spanish names    │         │
-│  │ - Russian names    │         │
-│  │ - French names     │         │
-│  └─────────────┘                │
-└──────────┬──────────────────────┘
-           │ Volume Mount
-           ▼
-┌─────────────────────────────────┐
-│  greenmask container            │
-│  ├─ Greenmask Engine            │
-│  └─ CustomLLMMasker             │
-│      ├─ Batch Processing        │
-│      ├─ Language Detection      │
-│      └─ Consistent Mapping      │
-└──────────┬──────────────────────┘
-           │ Output
-           ▼
-┌─────────────────────────────────┐
-│  sanitized.sql.gz               │
-│  mapping.json                   │
-└─────────────────────────────────┘
+my-sql-sanitizer/
+├── docker-compose.yml      # Container orchestration
+├── Dockerfile.greenmask    # Build image with dependencies
+├── config.yaml             # Transformation rules
+├── start.sh                # One-command run script
+├── Makefile               # build/run/clean targets
+├── .env.example           # Environment variables template
+├── prompt_templates/      # Name, phone, address prompts
+└── transformers/          # Custom LLM masker + city preserver
 ```
 
----
+## Test Datasets
 
-## 📦 What's included
+- `examples/chinook_test.sql` - Industry standard (59 customers, multi-country)
+- `examples/test_dump.sql` - Minimal validation (10 rows)
 
-### Test database (`test_dump.sql`)
-Contains realistic multilingual data:
-- 5 customers from 5 countries (Spain, Brazil, USA, Russia, France)
-- Names in Latin & Cyrillic scripts
-- Phone numbers in various formats
-- Email addresses
-- Addresses
+## Configuration
 
-### Configuration (`config.yaml`)
-Rules for tables found in test dump:
-- `customers`: first_name, last_name, email, phone
-- `orders`: shipping_phone
+Edit `config.yaml` to define which columns get transformed:
 
-### LLM Transformer (`transformers/llm_masker.py`)
-Features:
-- ✅ Batch processing (N values per API call)
-- ✅ Language detection from character sets
-- ✅ Consistent masking (same entity → same replacement)
-- ✅ Optional mapping export
-
----
-
-## 🔧 Configuring LLM API
-
-### Via `.env` file:
-```bash
-# Required
-OFOX_API_KEY=sk-your-api-key-here
-
-# Optional (defaults shown)
-LLM_MODEL=bailian/qwen3.5-flash
-LLM_ENDPOINT=https://api.ofox.ai/v1
-LLM_MAX_TOKENS=100
-LLM_TEMPERATURE=0.7
-batch_size=20
+```yaml
+transformers:
+  - table: Customer
+    skip_columns: [CustomerId]  # ← NEVER transform PK!
+    columns:
+      FirstName: { transformer: custom_llm_masker }
+      LastName: { transformer: custom_llm_masker }
+      Email: { transformer: mask_email }
+      Phone: { transformer: mask_phone }
 ```
 
----
+## How it Works
 
-## 💰 Performance & Cost
+1. Parse SQL dump line-by-line
+2. For each INSERT row, process fields sequentially
+3. Check skip list (PKs) → cached mapping → transform via LLM
+4. Rebuild INSERT statements with masked values
+5. Validate FK relationships → output sanitized.dump.gz
 
-### Batch Processing Benefits
-| Mode | Requests/100 rows | Time | Tokens | Cost |
-|------|-------------------|------|--------|------|
-| Single-row | 100 API calls | ~3 min | 50K | ~$0.02 |
-| **Batch (size=20)** | **5 API calls** | **~30 sec** | **50K** | **~$0.02** |
+See [`docs/`](docs/) for detailed architecture documentation.
 
-**Result:** Same cost, but **20x faster**!
+## License
 
----
-
-## 📊 Sample transformation results
-
-From `test_dump.sql` → `sanitized.sql.gz`:
-
-| Before | After | Note |
-|--------|-------|------|
-| Maria Garcia | Carmen Ruiz | Spanish→Spanish |
-| Roberto Silva | Pedro Santos | Portuguese→Portuguese |
-| Emma Johnson | Jennifer Smith | English→English |
-| Ярослав Иванов | Дмитрий Петров | Russian→Russian |
-| Sophie Dubois | Camille Bernard | French→French |
-
----
-
-## 🛠️ Usage commands
-
-```bash
-make build    # Build Docker image
-make run      # Run with test_dump.sql
-make verify   # Check output files  
-make clean    # Clean output directory
-```
-
-Or directly:
-```bash
-docker compose run --rm greenmask
-```
-
----
-
-## ✨ Next Steps
-
-1. ✅ Create test database with multilingual data
-2. ✅ Implement batch processing for efficiency  
-3. ✅ Add language detection to preserve scripts
-4. → **Test on actual data**
-5. → Tune prompt templates for your business domain
-6. → Integrate into CI/CD pipeline
-
----
-
-**Built with ❤️ using Greenmask + Ofox AI (Qwen)**  
-**GitHub:** https://github.com/Fivedirhams/test_sanitizer
+MIT License
