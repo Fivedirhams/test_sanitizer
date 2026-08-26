@@ -1,82 +1,145 @@
-# MySQL Database Sanitizer with LLM-based Masking
+# MySQL Database Sanitizer with LLM
 
-Production-ready tool for creating sanitized test databases from MySQL dumps using custom AI transformers and Greenmask engine.
+Автоматическое создание анонимизированных тестовых баз данных из MySQL дампов с использованием ИИ для замены чувствительных данных (имена, email, телефоны).
 
-## Features
-
-- ✅ **Language-aware masking** - names stay in original language (María → Carmen, not Яна)
-- ✅ **FK integrity preserved** - Primary Keys never transformed, foreign keys always valid
-- ✅ **Entity consistency** - same customer name = same replacement across all tables
-- ✅ **City-preserving addresses** - streets changed but cities/countries remain consistent
-- ✅ **Batch processing ready** - supports column-level batching for large datasets
-- ✅ **Docker-native** - single container orchestration with Greenmask engine
-- ✅ **Statistics report** - automatic generation of transformation summary
-
-## Quick Start
+## ⚡ Быстрый старт
 
 ```bash
-# 1. Configure API key
+# 1. Укажите API ключ
 cp .env.example .env
-echo 'OFOX_API_KEY=sk-your-key-here' >> .env
+echo "OFOX_API_KEY=sk-..." >> .env
 
-# 2. Run on sample data
+# 2. Запустите тест на примере
 cp examples/chinook_test.sql dump.sql
 ./start.sh
 
-# 3. Check results
-gunzip -c output/sanitized.sql.gz | head -50
-
-# 4. View statistics report (automatically generated)
+# 3. Проверьте результат
 cat output/report.txt
-# Or run manually:
-./tools/report.sh
 ```
 
-## Files
+## 📋 Что это такое?
+
+Это инструмент который берет **вашу SQL базу** и создаёт её **анонимную версию**:
+
+| Исходная база | → | Анонимная версия |
+|---------------|---|------------------|
+| `María García` | → | `Carmen López` |
+| `maria@gmail.com` | → | `anon@example.com` |
+| `+7-495-123-4567` | → | `+1-(XXX)-XXX-XXXX` |
+| `customer_id: 1` | → | `customer_id: 1` (НЕ меняется!) |
+
+### 🔑 Ключевые особенности
+
+- ✅ **FK integrity preserved** — первичные ключи не меняются (Foreign keys всегда работают)
+- ✅ **Язык сохранён** — испанские имена остаются испанскими, русские русскими
+- ✅ **Consistency** — одно имя заменяется одинаково во всех таблицах
+- ✅ **Готов к Docker** — один контейнер, одна команда запуска
+
+---
+
+## 🔧 Как адаптировать под БАЗУ заказчика?
+
+Вам НУЖНО только изменить `config.yaml`. Это НЕ меняет структуру базы!
+
+### Шаг 1. Получите дамп от заказчика
+
+```bash
+mysqldump -u root production_db > customer_dump.sql
+```
+
+### Шаг 2. Откройте config.yaml
+
+Он показывает **какие поля маскировать как**. Пример:
+
+```yaml
+transformers:
+  # ← ИЗМЕНИТЬ ЭТО:
+  - name: employees_transformer    # имя трансформера
+    schema: production_db          # ← база заказчика
+    table: employees               # ← их таблица
+    
+    skip_columns: [employee_id]    # ← ВСЕ *_id добавляйте сюда!
+    
+    columns:
+      full_name:
+        transformer: custom_llm_masker
+      work_email:
+        transformer: mask_email
+      mobile_number:
+        transformer: mask_phone
+```
+
+**Что изменять:**
+| В config.yaml | На что заменить |
+|--------------|-----------------|
+| `table: customers` | → `table: employees` (их таблица) |
+| `column first_name` | → `column full_name` (их колонки) |
+| `skip_columns: [customer_id]` | → добавьте все `*_id` поля |
+
+**Остальное НЕ МЕНЯТЬ!** Логика уже работает универсально.
+
+### Шаг 3. Тест + запуск
+
+```bash
+cp customer_dump.sql dump.sql
+./start.sh
+cat output/report.txt  # Проверить статистику
+```
+
+---
+
+## 📊 Таблица: Какие поля как маскировать
+
+| Тип поля | Паттерн имени | Transformer в config.yaml |
+|----------|--------------|---------------------------|
+| Имена людей | `first_name`, `last_name`, `full_name` | `custom_llm_masker` |
+| Email | `email`, `mail` | `mask_email` |
+| Телефоны | `phone`, `mobile`, `tel` | `mask_phone` |
+| Адреса | `address`, `street`, `city` | `city_preserving_address_masker` |
+| Даты | `birth_date`, `created_at` | `date_shift` (-7 дней) |
+| Любые другие | любое | `static_replace` |
+
+---
+
+## 🗂️ Структура проекта
 
 ```
 my-sql-sanitizer/
-├── docker-compose.yml      # Container orchestration (Greenmask-based)
-├── Dockerfile.greenmask    # Build image with dependencies
-├── config.yaml             # Transformation rules (universal!)
-├── start.sh                # One-command run script (+report gen)
-├── Makefile               # build/run/clean targets
-├── .env.example           # Environment variables template
-├── tools/                 # Utilities and reports
-│   ├── report.sh         # Generate stats report
-│   └── README.md         # Tool documentation
-├── docs/                  # Architecture documentation
-│   └── ARCHITECTURE.md   # Pipeline overview
-├── examples/              # Test datasets
-│   ├── chinook_test.sql  # Industry standard (59 customers!)
-│   └── test_dump.sql     # Minimal validation (10 rows)
-├── prompt_templates/      # Name, phone, address prompts
-├── transformers/          # Custom LLM masker + city preserver
-│   └── report_generator.py  # Statistics generator
-└── output/                # Generated files (sanitized.sql.gz, mapping.json)
+├── README.md              # Эта инструкция
+├── docker-compose.yml     # Контейнер с Greenmask
+├── Dockerfile.greenmask   # Сборка образа
+├── config.yaml            # Правила маскирования (меняется под клиентом)
+├── start.sh               # Одна команда для запуска
+├── .env.example           # Шаблон API ключа
+├── transformers/          # Кастомные трансформеры (не меняются)
+│   ├── llm_masker.py      # ИИ-маскирование имен
+│   └── report_generator.py# Генерация статистики
+├── prompt_templates/      # Промпты для ИИ (не меняются)
+└── examples/              # Тестовые дамыпы
+    └── chinook_test.sql   # Industry standard (59 клиентов!)
 ```
 
-## Documentation
+---
 
-| Document | Description | Use Case |
-|----------|-------------|----------|
-| [README.md](README.md) | This file - quick start | Getting started |
-| [TRANSFORMATION_RULES.md](TRANSFORMATION_RULES.md) | Complete rules ↔ config.yaml mapping | Understanding all transformer behaviors |
-| [QUICK_REFERENCE.md](QUICK_REFERENCE.md) | Answers to common questions | Adapting to new databases |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical architecture | Deep dive |
+## 🚀 Команды
 
-## How it Works
+```bash
+# Запустить санитайзер
+./start.sh
 
-1. Parse SQL dump line-by-line
-2. For each INSERT row, process fields sequentially
-3. Check skip list (PKs) → cached mapping → transform via LLM
-4. Rebuild INSERT statements with masked values
-5. Validate FK relationships → output sanitized.dump.gz
-6. Generate statistics report showing all transformations
+# Смотреть логи
+docker-compose logs -f sanitizer
 
-See [`TRANSFORMATION_RULES.md`](TRANSFORMATION_RULES.md) for complete rule documentation.
+# Проверить отчет
+cat output/report.txt
 
-## Example Statistics Report
+# Очистка результата
+make clean
+```
+
+---
+
+## 📈 Пример отчёта после запуска
 
 ```
 ============================================================
@@ -88,62 +151,34 @@ Total transformations applied: 847
 Unique entities processed: 59
 
 TRANSFORMATIONS BY FIELD:
-----------------------------------------
-  Customer.Address: 59 replacements
-  Customer.Email: 59 replacements  
   Customer.FirstName: 59 replacements
-  Customer.LastName: 59 replacements
+  Customer.Email: 59 replacements  
   Customer.Phone: 59 replacements
   Invoice.Total: 412 replacements
 
-SAMPLE CHANGES (original → transformed):
-----------------------------------------
-  • Luís Gonçalves → Carlos Santos
+SAMPLE CHANGES:
+  • María García → Carmen López
   • luisg@embraer.com.br → anon@example.com
   • +55 (12) 3923-5555 → +1 (XXX) XXX-XXXX
-  • São Paulo address → New street, São Paulo
-
-STATISTICS:
-  - Languages detected: Brazilian Portuguese, German, French, Spanish
-  - Countries preserved: Brazil, Germany, France, Canada
-  - Cities preserved in addresses: YES
-  - FK integrity: ALL LINKS VALID ✅
 ============================================================
 ```
 
-## License
+---
 
-MIT License
+## ❓ Частые вопросы
 
-## Auto-Adapter Mode (Experimental)
+**Q: Config.yaml меняет структуру базы?**  
+A: Нет! Это просто правила: *"это поле замаскируй так, а то — так"*
 
-Automatically adapt the configuration file using LLM analysis of your SQL dump:
+**Q: FK relationships сохранятся?**  
+A: Да! Все `*_id` автоматически пропускаются через `skip_columns`
 
-```bash
-# 1. Analyze dump with LLM
-./scripts/auto_adapt.sh --dump customer_database.sql --adapt
+**Q: Работает с любой MySQL базой?**  
+A: Да! Нужно только поменять имена таблиц/колонок в config.yaml
 
-# 2. Interactive mode (review before accepting)
-./scripts/auto_adapt.sh -d production_dump.sql --interactive
+**Q: Сколько времени адаптация?**  
+A: ~5 минут вручную или 20 минут через auto-адаптер (`./scripts/auto_adapt.sh --dump db.sql`)
 
-# 3. Non-interactive mode (auto-accept)
-./scripts/auto_adapt.sh -d mydb.sql --skip-prompt
+---
 
-# 4. Dry run (analyze only)
-./scripts/auto_adapt.sh --dry-run --verbose
-
-# Or use Python CLI:
-python tools/analyze_config.py --dump mydb.sql --interactive
-```
-
-**Available options:**
-| Flag | Description |
-|------|-------------|
-| `--dump FILE` | Path to SQL dump (default: examples/chinook_test.sql) |
-| `--adapt` | Enable LLM-based config generation |
-| `--interactive` | Ask user confirmation before each change |
-| `--skip-prompt` | Auto-accept (no prompts) |
-| `--dry-run` | Analyze without running sanitizer |
-| `--verbose` | Show detailed output |
-
-See `./scripts/auto_adapt.sh --help` for full documentation.
+**MIT License**
