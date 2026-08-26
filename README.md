@@ -114,3 +114,36 @@ STATISTICS:
 ## License
 
 MIT License
+
+## Auto-Adapter Mode (Experimental)
+
+Automatically adapt the configuration file using LLM analysis of your SQL dump:
+
+```bash
+# 1. Analyze dump with LLM
+./scripts/auto_adapt.sh --dump customer_database.sql --adapt
+
+# 2. Interactive mode (review before accepting)
+./scripts/auto_adapt.sh -d production_dump.sql --interactive
+
+# 3. Non-interactive mode (auto-accept)
+./scripts/auto_adapt.sh -d mydb.sql --skip-prompt
+
+# 4. Dry run (analyze only)
+./scripts/auto_adapt.sh --dry-run --verbose
+
+# Or use Python CLI:
+python tools/analyze_config.py --dump mydb.sql --interactive
+```
+
+**Available options:**
+| Flag | Description |
+|------|-------------|
+| `--dump FILE` | Path to SQL dump (default: examples/chinook_test.sql) |
+| `--adapt` | Enable LLM-based config generation |
+| `--interactive` | Ask user confirmation before each change |
+| `--skip-prompt` | Auto-accept (no prompts) |
+| `--dry-run` | Analyze without running sanitizer |
+| `--verbose` | Show detailed output |
+
+See `./scripts/auto_adapt.sh --help` for full documentation.
