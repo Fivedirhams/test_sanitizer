@@ -1,93 +1,82 @@
 #!/bin/bash
-# MySQL Database Sanitizer - Main orchestration script
-# Usage: ./start.sh [options]
-# Options:
-#   --no-report     Skip generating statistics report
-#   --csv           Export stats to CSV format
+# MySQL Database Sanitizer - Single command execution
+# Usage: ./start.sh [--reconcile] [--validate]
 
 set -e
 
-# Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DUMP_FILE="${1:-dump.sql}"
-OUTPUT_DIR="${SCRIPT_DIR}/output"
-REPORT_ENABLED=true
-CSV_EXPORT=false
+cd "$SCRIPT_DIR"
 
-# Parse options
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --no-report) REPORT_ENABLED=false; shift ;;
-        --csv) CSV_EXPORT=true; shift ;;
-        *) echo "Unknown option: $1"; exit 1 ;;
-    esac
-done
-
-echo "=========================================="
-echo "🔐 MySQL Database Sanitizer"
-echo "=========================================="
-echo ""
-echo "Input:    $DUMP_FILE"
-echo "Output:   ${OUTPUT_DIR}/sanitized.sql.gz"
-echo ""
-
-# Validate input file exists
-if [[ ! -f "$DUMP_FILE" ]]; then
-    echo "[ERROR] Input dump file not found: $DUMP_FILE"
-    echo "Usage: cp examples/chinook_test.sql dump.sql && ./start.sh"
+# Check API key
+if [[ ! -f ".env" ]] || ! grep -q "OFOX_API_KEY=" .env; then
+    echo "⚠️  ERROR: OFOX_API_KEY not configured!"
+    echo "Run: cp .env.example .env && vim .env"
     exit 1
 fi
 
-# Create output directory
-mkdir -p "$OUTPUT_DIR"
-
-# Run Greenmask
-echo "🚀 Running sanitization..."
-docker-compose up -d sanitizer
-docker-compose logs -f sanitizer | tee "$OUTPUT_DIR/greenmask.log" || true
-
-# Check if mapping was created
-MAPPING_FILE="${OUTPUT_DIR}/mapping.json"
-if [[ -f "$MAPPING_FILE" ]]; then
-    echo ""
-    echo "✅ Sanitization complete!"
-    echo ""
-    
-    # Generate summary report (always)
-    python3 << PYTHON
-import sys
-sys.path.insert(0, '/project/my-sql-sanitizer/transformers')
-from report_generator import SanitizationReportGenerator
-
-reporter = SanitizationReportGenerator('$MAPPING_FILE')
-print(reporter.generate_summary_report())
-PYTHON
-    
-    echo ""
-    
-    # Optional: Export to CSV
-    if [[ "$CSV_EXPORT" == "true" ]] || grep -q "csv" <<< "$@"; then
-        python3 << PYTHON
-import sys
-sys.path.insert(0, '/project/my-sql-sanitizer/transformers')
-from report_generator import export_transformation_stats
-
-rows = export_transformation_stats('$MAPPING_FILE', '$OUTPUT_DIR/stats.csv')
-print(f"\n📈 Statistics: {len(rows)} transformations exported")
-PYTHON
-        echo "✅ Stats CSV saved to: $OUTPUT_DIR/stats.csv"
-    fi
-    
-else
-    echo "⚠️  Warning: No mapping file generated (transformations may not be tracked)"
+INPUT_DUMP="${1:-dump.sql}"
+if [[ ! -f "$INPUT_DUMP" ]]; then
+    echo "❌ Input dump not found: $INPUT_DUMP"
+    echo "Use: cp examples/chinook_test.sql dump.sql"
+    exit 1
 fi
 
+echo "============================================================"
+echo "🗄️  MySQL Database Sanitizer (Realistic Anonymization Only)"
+echo "============================================================"
 echo ""
-echo "=========================================="
-echo "📁 Files created:"
-echo "=========================================="
-ls -lh "$OUTPUT_DIR"/
+echo "Input:   $INPUT_DUMP"
+echo "Mode:    Realistic anonymization (NO obfuscation)"
+echo "Output:  output/sanitized.sql.gz"
 echo ""
-echo "To view sanitized data:"
-gunzip -c "$OUTPUT_DIR/sanitized.sql.gz" | head -50
 
+mkdir -p output
+
+# Step 1: Primary sanitization with Greenmask
+echo "🔄 Step 1: Running primary sanitization pass..."
+docker-compose run --rm sanitizer greenmask sanitise \
+    --config=/app/config.yaml \
+    --source-path=/data/${INPUT_DUMP} \
+    --destination-path=/output/sanitized.sql
+
+echo "✅ Primary sanitization complete"
+echo ""
+
+# Step 2: Post-processing JSON & cross-reference reconciliation
+echo "🔧 Step 2: Running consistency reconciliation..."
+python3 tools/json_reconciler.py \
+    --input output/sanitized.sql \
+    --mapping output/mapping.json \
+    --output output/sanitized_final.sql
+
+echo "✅ Consistency reconciliation complete"
+echo ""
+
+# Step 3: Compress final output
+echo "💾 Step 3: Compressing output..."
+gzip -9 output/sanitized_final.sql
+mv output/sanitized_final.sql.gz output/sanitized.sql.gz
+
+echo "✅ Compression complete"
+echo ""
+
+# Step 4: Generate statistics report
+echo "📊 Step 4: Generating statistics report..."
+python3 transformers/report_generator.py \
+    --mapping output/mapping.json \
+    --output output/report.txt
+
+echo "✅ Report generated"
+echo ""
+
+echo "============================================================"
+echo "🎉 SANITIZATION COMPLETE!"
+echo "============================================================"
+echo ""
+cat output/report.txt
+echo ""
+echo "Output files:"
+ls -lh output/
+
+echo ""
+echo "To validate consistency, run: python3 tools/json_reconciler.py --validate"

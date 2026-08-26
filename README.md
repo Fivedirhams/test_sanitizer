@@ -1,45 +1,48 @@
-# MySQL Database Sanitizer with LLM
+# MySQL Database Sanitizer with Realistic Anonymization
 
-Автоматическое создание анонимизированных тестовых баз данных из MySQL дампов с использованием ИИ для замены чувствительных данных (имена, email, телефоны).
+Автоматическое создание анонимизированных тестовых баз данных из MySQL дампов с ИИ для замены чувствительных данных.
+
+**ВАЖНО**: Только реалистичная анонимизация (no obfuscation). Не `anon@example.com`, а реальные данные вида `pedro.silva@gmail.com`.
 
 ## ⚡ Быстрый старт
 
 ```bash
-# 1. Укажите API ключ
+# 1. API ключ
 cp .env.example .env
 echo "OFOX_API_KEY=sk-..." >> .env
 
-# 2. Запустите тест на примере
+# 2. Дамп для теста
 cp examples/chinook_test.sql dump.sql
+
+# 3. Запуск (автоматически + пост-процессинг)
 ./start.sh
 
-# 3. Проверьте результат
+# 4. Результат
 cat output/report.txt
 ```
 
-## 📋 Что это такое?
+---
 
-Это инструмент который берет **вашу SQL базу** и создаёт её **анонимную версию**:
+## 📋 Что делает инструмент
 
-| Исходная база | → | Анонимная версия |
-|---------------|---|------------------|
-| `María García` | → | `Carmen López` |
-| `maria@gmail.com` | → | `anon@example.com` |
-| `+7-495-123-4567` | → | `+1-(XXX)-XXX-XXXX` |
-| `customer_id: 1` | → | `customer_id: 1` (НЕ меняется!) |
+| Исходное значение | → | Анонимное значение | Сохранено? |
+|-------------------|---|-------------------|------------|
+| `María García` | → | `Carmen López` | ✅ Язык, стиль |
+| `maria.garcia@gmail.com` | → | `pedro.silva@gmail.com` | ✅ Формат local_part |
+| `+7-495-123-4567` | → | `+7-495-987-6543` | ✅ Country + area code |
+| `customer_id: 1` | → | `customer_id: 1` | ✅ FK integrity |
 
-### 🔑 Ключевые особенности
+### 🔑 Ключевые фичи
 
-- ✅ **FK integrity preserved** — первичные ключи не меняются (Foreign keys всегда работают)
-- ✅ **Язык сохранён** — испанские имена остаются испанскими, русские русскими
-- ✅ **Consistency** — одно имя заменяется одинаково во всех таблицах
-- ✅ **Готов к Docker** — один контейнер, одна команда запуска
+- ✅ **Реалистичные данные** — не заглушки, валидные значения для тестов
+- ✅ **Языковая консистентность** — испанский остаётся испанским
+- ✅ **Структурная консистентность** — тот же формат email/телефона
+- ✅ **FK integrity preserved** — первичные ключи не трогаем
+- ✅ **Cross-reference pass** — финальная проверка ВСЕЙ базы на консистентность
 
 ---
 
-## 🔧 Как адаптировать под БАЗУ заказчика?
-
-Вам НУЖНО только изменить `config.yaml`. Это НЕ меняет структуру базы!
+## 🔧 Как адаптировать под БАЗУ заказчика
 
 ### Шаг 1. Получите дамп от заказчика
 
@@ -47,57 +50,58 @@ cat output/report.txt
 mysqldump -u root production_db > customer_dump.sql
 ```
 
-### Шаг 2. Откройте config.yaml
+### Шаг 2. Измените config.yaml
 
-Он показывает **какие поля маскировать как**. Пример:
+Это НЕ меняет структуру базы! Это только правила маскирования.
 
 ```yaml
 transformers:
-  # ← ИЗМЕНИТЬ ЭТО:
-  - name: employees_transformer    # имя трансформера
+  # ← ИЗМЕНИТЬ ИМЕНА ТАБЛИЦ/КОЛОНОК:
+  - name: employees_transformer    # их таблица
     schema: production_db          # ← база заказчика
     table: employees               # ← их таблица
     
-    skip_columns: [employee_id]    # ← ВСЕ *_id добавляйте сюда!
-    
+    skip_columns:                  # ← ВСЕ *_id добавляйте сюда!
+      - employee_id
+      - department_id
+      
     columns:
       full_name:
         transformer: custom_llm_masker
       work_email:
-        transformer: mask_email
+        transformer: custom_email_generator
       mobile_number:
-        transformer: mask_phone
+        transformer: custom_phone_generator
 ```
 
-**Что изменять:**
-| В config.yaml | На что заменить |
-|--------------|-----------------|
+**Что менять:**
+| config.yaml параметр | На что заменить |
+|---------------------|-----------------|
 | `table: customers` | → `table: employees` (их таблица) |
-| `column first_name` | → `column full_name` (их колонки) |
-| `skip_columns: [customer_id]` | → добавьте все `*_id` поля |
+| `column first_name` | → `column full_name` (их колонка) |
+| `skip_columns: [customer_id]` | → добавить все `*_id` поля |
 
-**Остальное НЕ МЕНЯТЬ!** Логика уже работает универсально.
+**Не менять:** трансформеры работают универсально для любой базы.
 
-### Шаг 3. Тест + запуск
+### Шаг 3. Запуск
 
 ```bash
 cp customer_dump.sql dump.sql
 ./start.sh
-cat output/report.txt  # Проверить статистику
+cat output/report.txt
 ```
 
 ---
 
-## 📊 Таблица: Какие поля как маскировать
+## 🛠️ Трансформеры и как их настроить
 
-| Тип поля | Паттерн имени | Transformer в config.yaml |
-|----------|--------------|---------------------------|
-| Имена людей | `first_name`, `last_name`, `full_name` | `custom_llm_masker` |
-| Email | `email`, `mail` | `mask_email` |
-| Телефоны | `phone`, `mobile`, `tel` | `mask_phone` |
-| Адреса | `address`, `street`, `city` | `city_preserving_address_masker` |
-| Даты | `birth_date`, `created_at` | `date_shift` (-7 дней) |
-| Любые другие | любое | `static_replace` |
+| Поле | Transformer | Что делает | Конфиг пример |
+|------|-------------|-----------|---------------|
+| Имена | `custom_llm_masker` | LLM генерирует имена в том же языке | `prompt_template_file: name.txt` |
+| Email | `custom_email_generator` | Генерирует email same style | `preserve_domain: false` |
+| Телефон | `custom_phone_generator` | Генерирует номер той же страны | (country code auto-detected) |
+| Адреса | `city_preserving_address_masker` | Меняет улицу, город остаётся | (авто) |
+| JSON логи | `json_reconciler.py` (пост-процессинг) | Проверяет все ячейки на консистентность | `python tools/json_reconciler.py --mapping output/mapping.json` |
 
 ---
 
@@ -105,79 +109,76 @@ cat output/report.txt  # Проверить статистику
 
 ```
 my-sql-sanitizer/
-├── README.md              # Эта инструкция
-├── docker-compose.yml     # Контейнер с Greenmask
-├── Dockerfile.greenmask   # Сборка образа
-├── config.yaml            # Правила маскирования (меняется под клиентом)
-├── start.sh               # Одна команда для запуска
-├── .env.example           # Шаблон API ключа
-├── transformers/          # Кастомные трансформеры (не меняются)
-│   ├── llm_masker.py      # ИИ-маскирование имен
-│   └── report_generator.py# Генерация статистики
-├── prompt_templates/      # Промпты для ИИ (не меняются)
-└── examples/              # Тестовые дамыпы
-    └── chinook_test.sql   # Industry standard (59 клиентов!)
+├── README.md                # Эта инструкция
+├── config.yaml              # Правила маскирования (меняется под клиента)
+├── start.sh                 # Команда запуска (+ реконциляция)
+├── transformers/            # Трансформеры
+│   ├── llm_masker.py        # ИИ-маскирование имен
+│   ├── email_generator.py   # Генератор email (реалистичный)
+│   ├── phone_generator.py   # Генератор телефона (регион сохраняется)
+│   └── report_generator.py  # Статистика после запуска
+├── tools/                   # Утилиты
+│   ├── json_reconciler.py   # Финальный проход на консистентность
+│   └── auto_adapt.sh        # Авто-генерация config (показать)
+└── examples/
+    └── chinook_test.sql     # Тестовый дамп (59 клиентов!)
 ```
 
 ---
 
-## 🚀 Команды
-
-```bash
-# Запустить санитайзер
-./start.sh
-
-# Смотреть логи
-docker-compose logs -f sanitizer
-
-# Проверить отчет
-cat output/report.txt
-
-# Очистка результата
-make clean
-```
-
----
-
-## 📈 Пример отчёта после запуска
+## 📈 Пример отчёта
 
 ```
 ============================================================
 📊 SANITIZATION REPORT
 ============================================================
 
-Generated at: 2024-08-26 15:03:22
 Total transformations applied: 847
 Unique entities processed: 59
 
-TRANSFORMATIONS BY FIELD:
-  Customer.FirstName: 59 replacements
-  Customer.Email: 59 replacements  
-  Customer.Phone: 59 replacements
-  Invoice.Total: 412 replacements
+EMAILS transformed: maria.garcia@gmail.com → pedro.silva@gmail.com
+PHONES transformed: +7-495-123-4567 → +7-495-987-6543
+NAMES transformed: María García → Carmen López
 
-SAMPLE CHANGES:
-  • María García → Carmen López
-  • luisg@embraer.com.br → anon@example.com
-  • +55 (12) 3923-5555 → +1 (XXX) XXX-XXXX
-============================================================
+✅ All cross-references reconciled
 ```
 
 ---
 
-## ❓ Частые вопросы
+## ❓ Вопросы
 
 **Q: Config.yaml меняет структуру базы?**  
-A: Нет! Это просто правила: *"это поле замаскируй так, а то — так"*
+A: Нет! Только правила: *"это поле замаскируй так"*
+
+**Q: Почему не обфускация типа anon@example.com?**  
+A: Потому что это бесполезно для тестирования. Нужны реалистичные данные которые выглядят как настоящие.
 
 **Q: FK relationships сохранятся?**  
 A: Да! Все `*_id` автоматически пропускаются через `skip_columns`
 
-**Q: Работает с любой MySQL базой?**  
-A: Да! Нужно только поменять имена таблиц/колонок в config.yaml
+**Q: JSON поля в логах тоже проверятся?**  
+A: Да! `json_reconciler.py` — финальный шаг который проверяет ВЕСЬ дамп на наличие любых оставшихся оригинальных значений
 
-**Q: Сколько времени адаптация?**  
-A: ~5 минут вручную или 20 минут через auto-адаптер (`./scripts/auto_adapt.sh --dump db.sql`)
+---
+
+## ⚙️ Команды
+
+```bash
+# Основной запуск (with reconciliation)
+./start.sh
+
+# Только первичный прогон (без reconciliation)
+docker-compose run --rm sanitizer greenmask sanitise --config=config.yaml
+
+# Проверить консистентность вручную
+python3 tools/json_reconciler.py --input output/sanitized.sql.gz --mapping output/mapping.json --validate
+
+# Посмотреть статистику
+cat output/report.txt
+
+# Очистка результата
+make clean
+```
 
 ---
 
