@@ -12,23 +12,48 @@ from typing import Optional, Any
 
 
 class CustomLLMMasker(BaseTransformer):
-    """Кастомный трансформер на базе LLM для замены чувствительных данных"""
+    """Кастомный трансформер на базе LLM для замены чувствительных данных
+    
+    Чтение переменных окружения:
+        - OFOX_API_KEY: API key для ofox.ai (обязательно)
+        - LLM_ENDPOINT: Endpoint API (по умолчанию https://api.ofox.ai/v1)
+        - LLM_MODEL: Модель (по умолчанию bailian/qwen3.5-flash)
+        - LLM_MAX_TOKENS: Max tokens in response (по умолчанию 100)
+        - LLM_TEMPERATURE: Temperature parameter (по умолчанию 0.7)
+        - MAPPING_PATH: Путь для сохранения маппинга (опционально)
+    """
     
     def __init__(
         self,
         *args,
         prompt_template_file: str,
-        llm_model: str = "bailian/qwen3.5-flash",
-        api_base_url: str = "https://api.ofox.ai/v1",
+        llm_model: Optional[str] = None,
         mapping_path: Optional[str] = None,
         **kwargs
     ):
         super().__init__(*args, **kwargs)
         
+        # --- Чтение из параметров config.yaml ---
         self.prompt_template = self._load_prompt_template(prompt_template_file)
-        self.llm_model = llm_model
-        self.api_base_url = api_base_url
+        self.llm_model = llm_model or self._get_env('LLM_MODEL', 'bailian/qwen3.5-flash')
+        self.api_base_url = self._get_env('LLM_ENDPOINT', 'https://api.ofox.ai/v1')
+        self.max_tokens = int(self._get_env('LLM_MAX_TOKENS', '100'))
+        self.temperature = float(self._get_env('LLM_TEMPERATURE', '0.7'))
         self.mapping_path = mapping_path
+        
+        # Поддержка через Greenmask parent class kwargs
+        if not self.mapping_path and hasattr(self, '_parent_context'):
+            context = getattr(self, '_parent_context', {})
+            self.mapping_path = context.get('mapping', {}).get('output_path')
+        
+        # --- Чтение API ключа из env vars ---
+        api_key = self._get_env('OFOX_API_KEY')
+        if not api_key:
+            raise ValueError(
+                "Environment variable OFOX_API_KEY must be set!\n"
+                "Add to .env file or pass via -e OFOX_API_KEY=your_key"
+            )
+        self.api_key = api_key
         
         # Загрузка существующего маппинга при инициализации
         self.entity_mapping: dict = {}
@@ -36,11 +61,6 @@ class CustomLLMMasker(BaseTransformer):
             with open(mapping_path, 'r') as f:
                 data = json.load(f)
                 self.entity_mapping = data.get('mapping', {})
-        
-        # Сохранение API ключа из env
-        self.api_key = os.environ.get('OFOX_API_KEY')
-        if not self.api_key:
-            raise ValueError("Environment variable OFOX_API_KEY must be set")
     
     def _load_prompt_template(self, template_file: str) -> str:
         """Загрузить шаблон промпта из файла"""
@@ -51,12 +71,16 @@ class CustomLLMMasker(BaseTransformer):
             # Дефолтные шаблоны
             return "Замени значение '{original_value}' на случайное русское {field_type}. Верни только новое значение."
     
+    def _get_env(self, key: str, default: str = '') -> str:
+        """Чтение переменной окружения с fallback к дефолту"""
+        return os.environ.get(key, default)
+    
     def _create_entity_key(self, table_name: str, column_name: str, value: Any) -> str:
         """Создать уникальный ключ для сущности (для консистентности замен)"""
         return f"{table_name}:{column_name}:{hashlib.sha256(str(value).encode()).hexdigest()}"
     
     def _call_llm(self, prompt: str) -> Optional[str]:
-        """Вызов LLM через ofox API"""
+        """Вызов LLM через ofox API с переменными окружения"""
         try:
             response = requests.post(
                 f"{self.api_base_url}/chat/completions",
@@ -67,8 +91,8 @@ class CustomLLMMasker(BaseTransformer):
                 json={
                     "model": self.llm_model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.7,
-                    "max_tokens": 100
+                    "temperature": self.temperature,
+                    "max_tokens": self.max_tokens
                 }
             )
             response.raise_for_status()
@@ -77,7 +101,11 @@ class CustomLLMMasker(BaseTransformer):
         except Exception as e:
             print(f"[ERROR] LLM call failed: {e}")
             # Фоллбек на простую замену при ошибке
-            return f"[MASKED_{hashlib.md5(str(value).encode()).hexdigest()[:8]}]"
+            import hashlib
+            if original_value:
+                return f"[MASKED_{hashlib.md5(str(original_value).encode()).hexdigest()[:8]}]"
+            else:
+                return "[MASKED]"
     
     def _is_sensitive(self, value: Any) -> bool:
         """Определить, является ли поле чувствительным"""

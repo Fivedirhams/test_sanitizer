@@ -37,4 +37,3 @@ test -f ./output/mapping.json && echo "  🗺️  ./output/mapping.json - мап
 echo ""
 echo "Загрузите результат в dev базу:"
 echo "  gunzip -c ./output/sanitized.sql.gz | mysql -h dev-host db_name"
-echo ""

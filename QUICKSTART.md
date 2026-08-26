@@ -4,7 +4,7 @@
 
 ```bash
 # 1. Клонируйте репозиторий
-cd /project-data-sanitizer
+cd /project/my-sql-sanitizer
 
 # 2. Создайте дамп вашей базы данных
 mysqldump -h production.db.internal -u root -p > dump.sql

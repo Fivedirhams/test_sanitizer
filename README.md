@@ -7,7 +7,7 @@
 ### 1. Clone this repository
 
 ```bash
-cd /project-data-sanitizer
+cd /project/my-sql-sanitizer
 git init
 ```
 

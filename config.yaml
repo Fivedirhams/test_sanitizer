@@ -20,14 +20,16 @@ transformers:
       first_name:
         transformer: custom_llm_masker
         params:
-          prompt_template_file: ./prompt_templates/name.txt
+          prompt_template_file: /app/prompt_templates/name.txt
           llm_model: bailian/qwen3.5-flash
+          mapping_path: /output/mapping.json
       
       last_name:
         transformer: custom_llm_masker
         params:
-          prompt_template_file: ./prompt_templates/name.txt
+          prompt_template_file: /app/prompt_templates/name.txt
           llm_model: bailian/qwen3.5-flash
+          mapping_path: /output/mapping.json
       
       email:
         transformer: mask_email
@@ -55,8 +57,9 @@ transformers:
       customer_phone:
         transformer: custom_llm_masker
         params:
-          prompt_template_file: ./prompt_templates/phone.txt
+          prompt_template_file: /app/prompt_templates/phone.txt
           llm_model: bailian/qwen3.5-flash
+          mapping_path: /output/mapping.json
       
       shipping_address:
         transformer: static_replace

@@ -7,12 +7,16 @@ services:
       context: .
       dockerfile: Dockerfile.greenmask
     volumes:
-      - ./dump:/input
-      - ./output:/output
+      - ./dump:/input          # Input dump.sql mounted here
+      - ./output:/output       # Output sanitized.sql.gz
       - ./transformers:/app/transformers
-      - ./config:/configs
+      - ./prompt_templates:/app/prompt_templates
     environment:
       - OFOX_API_KEY=${OFOX_API_KEY}
+      - LLM_ENDPOINT=${LLM_ENDPOINT:-https://api.ofox.ai/v1}
+      - LLM_MODEL=${LLM_MODEL:-bailian/qwen3.5-flash}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-100}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.7}
     working_dir: /app
     command: >
       greenmask sanitise \
